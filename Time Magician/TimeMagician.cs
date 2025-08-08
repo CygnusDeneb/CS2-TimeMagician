@@ -1,37 +1,31 @@
-using System;
 using Colossal.Serialization.Entities;
 using Game;
 using Game.Common;
-using Game.Prefabs;
 using Game.Simulation;
 using Unity.Entities;
-using UnityEngine;
 
 namespace Time_Magician
 {
     public partial class TimeMagician : GameSystemBase
     {
         private SimulationSystem _simulation;
-        private PlanetarySystem _planetarySystem;
-        private TimeSystem _timeSystem;
         private EntityQuery _timeData;
 
         private bool _isEditor;
         private bool _isPaused;
-        private bool _isLoaded = false;
+        private bool _isLoaded;
         
         private TimeData m_TimeData;
-        private float _currTime;
-        private float _currDay;
         private uint ticks;
         private uint elapsedTicks;
         private uint m_FirstFrame;
 
+        private int shiftType;
+        private int shiftStep;
+
         protected override void OnCreate()
         {
             base.OnCreate();
-            _timeSystem = World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<TimeSystem>();
-            _planetarySystem = World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<PlanetarySystem>();
             _simulation = World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<SimulationSystem>();
         }
 
@@ -43,10 +37,10 @@ namespace Time_Magician
             _isLoaded = true;
 
             _timeData = this.GetEntityQuery(ComponentType.ReadOnly<TimeData>());
-            _planetarySystem.overrideTime = true;
             m_FirstFrame = _simulation.frameIndex;
             
-            UpdatePlanetary();
+            ticks = 0;
+            elapsedTicks = 0;
         }
 
         protected override void OnGameLoadingComplete(Purpose purpose, GameMode mode)
@@ -62,45 +56,67 @@ namespace Time_Magician
             _isLoaded = true;
         }
         
-        public void UpdatePlanetary()
+        private void FastAccelerator(int jumpCount)
         {
-            if (_isEditor) return;
-            
-            _planetarySystem.overrideTime = true;
+            ticks = _simulation.frameIndex;
+            elapsedTicks = ticks - m_FirstFrame;
+            if (elapsedTicks > jumpCount)
+            {
+                m_TimeData = _timeData.GetSingleton<TimeData>();
+                TimeData newTimeData = new TimeData();
+                newTimeData.m_FirstFrame = (uint) (m_TimeData.m_FirstFrame - shiftType * jumpCount);
+                newTimeData.TimeOffset = m_TimeData.TimeOffset;
+                newTimeData.m_StartingMonth = m_TimeData.m_StartingMonth;
+                newTimeData.m_StartingYear = m_TimeData.m_StartingYear;
+                
+                _timeData.SetSingleton(newTimeData);
 
-            _currTime = _timeSystem.normalizedTime;
-            _currDay = _timeSystem.normalizedDate;
-            _planetarySystem.normalizedTime = _currTime;
-            _planetarySystem.normalizedDayOfYear = _currDay;
+                m_FirstFrame = ticks;
+            }
+
         }
+        
+        private void SlowAccelerator(int jumpCount)
+        {
+            ticks = _simulation.frameIndex;
+            elapsedTicks = ticks - m_FirstFrame;
 
+            if (elapsedTicks > jumpCount)
+            {
+                m_TimeData = _timeData.GetSingleton<TimeData>();
+                TimeData newTimeData = new TimeData();
+                newTimeData.m_FirstFrame = (uint) (m_TimeData.m_FirstFrame - shiftType);
+                newTimeData.TimeOffset = m_TimeData.TimeOffset;
+                newTimeData.m_StartingMonth = m_TimeData.m_StartingMonth;
+                newTimeData.m_StartingYear = m_TimeData.m_StartingYear;
+                
+                _timeData.SetSingleton(newTimeData);
+                
+                m_FirstFrame = ticks;
+
+            }
+        }
+        
         protected override void OnUpdate()
         {
             if (!_isLoaded) return;
             
             _isPaused = _simulation.selectedSpeed == 0;
-            if (_isPaused) return;
-            
-            ticks = _simulation.frameIndex;
-            elapsedTicks = ticks - m_FirstFrame;
-
-            if (elapsedTicks < 4)
+            if (_isPaused)
             {
-                m_TimeData = _timeData.GetSingleton<TimeData>();
-                TimeData newTimeData = new TimeData();
-                newTimeData.m_FirstFrame = m_TimeData.m_FirstFrame + 1;
-                newTimeData.TimeOffset = m_TimeData.TimeOffset;
-                newTimeData.m_StartingMonth = m_TimeData.m_StartingMonth;
-                newTimeData.m_StartingYear = m_TimeData.m_StartingYear;
-                
-                _timeData.SetSingleton<TimeData>(newTimeData);
+                shiftType = (int) Mod.m_Settings.shiftingMod;
+                shiftStep = Mod.m_Settings.accelerationIndex;
+                return;
+            }
+
+            if (shiftStep > 0)
+            {
+                FastAccelerator(shiftStep + 1);
             }
             else
             {
-                m_FirstFrame = ticks;
+                SlowAccelerator(-shiftStep + 1);
             }
-            
-            UpdatePlanetary();
         }
     }
 }
